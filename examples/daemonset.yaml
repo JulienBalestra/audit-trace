@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: audit-trace
+  namespace: default
+  labels:
+    app: audit-trace
+spec:
+  selector:
+    matchLabels:
+      app: audit-trace
+  template:
+    metadata:
+      labels:
+        app: audit-trace
+    spec:
+      hostNetwork: true # depends on your agent setup
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      containers:
+      - name: audit-trace
+        image: quay.io/julienbalestra/audit-trace:master
+        command:
+        - /usr/local/bin/audit-trace
+        - --audit-log-path=/opt/sandbox/logs/audit.log
+        - --agent=datadog
+        - --trace-agent-endpoint=127.0.0.1:8126
+        - -v=2
+        #- --agent=jaeger
+        #- --trace-agent-endpoint=jaeger.default.svc.cluster.local:5775
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: audit-log
+          mountPath: /opt/sandbox/logs
+          readOnly: true
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: audit-log
+        hostPath:
+          path: /opt/sandbox/logs # adapt where the audit-logs are stored
+---
