@@ -1,12 +1,12 @@
 package event
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/opentracing/opentracing-go"
 	"k8s.io/apiserver/pkg/apis/audit"
-	"strconv"
-	"fmt"
 )
 
 // SpanEvent is a kubernetes audit Event generated from the audit logs

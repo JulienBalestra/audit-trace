@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/JulienBalestra/audit-trace/pkg/reporter"
+	"time"
 )
 
 const programName = "audit-trace"
@@ -75,6 +76,10 @@ func NewCommand() (*cobra.Command, *int) {
 	rootCommand.PersistentFlags().String("agent", viperConfig.GetString("agent"), fmt.Sprintf("agent to use (%s, %s)", reporter.JaegerAgent, reporter.DatadogAgent))
 	viperConfig.BindPFlag("agent", rootCommand.PersistentFlags().Lookup("agent"))
 
+	viperConfig.SetDefault("backlog-limit", time.Minute*15)
+	rootCommand.PersistentFlags().String("backlog-limit", viperConfig.GetString("backlog-limit"), "backlog-limit to process")
+	viperConfig.BindPFlag("backlog-limit", rootCommand.PersistentFlags().Lookup("backlog-limit"))
+
 	return rootCommand, &exitCode
 }
 
@@ -110,7 +115,8 @@ func newReporter() (*reporter.Reporter, error) {
 			ServiceName:                serviceName,
 			ServiceNameWatch:           serviceNameWatch,
 			GarbageCollectionThreshold: gcThreshold,
-			Agent: agent,
+			Agent:        agent,
+			BacklogLimit: viperConfig.GetDuration("backlog-limit"),
 		},
 	)
 }

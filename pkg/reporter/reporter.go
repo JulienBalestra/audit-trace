@@ -36,6 +36,7 @@ type Config struct {
 	GarbageCollectionThreshold int
 	Agent                      string
 	GarbageCollectPeriod       time.Duration
+	BacklogLimit               time.Duration
 }
 
 // Reporter contains the configuration and the state
@@ -47,6 +48,8 @@ type Reporter struct {
 	eventReceived      map[types.UID]*event.SpanEvent
 	eventReceivedMutex sync.Mutex
 	stopGC             chan struct{}
+	processedEvent     int
+	skipepdEvent       int
 }
 
 // NewReporter instantiate a New Reporter
@@ -148,7 +151,16 @@ func (r *Reporter) processLine(line *string) {
 		glog.Errorf("Cannot convert to audit: %v", err)
 		return
 	}
-	glog.V(2).Infof("Event %s %s %s", ev.AuditID, ev.Stage, ev.RequestURI)
+	glog.V(2).Infof("New event %s %s %s", ev.AuditID, ev.Stage, ev.RequestURI)
+	if ev.RequestReceivedTimestamp.Time.Before(time.Now().Add(-r.conf.BacklogLimit)) {
+		// TODO use prometheus for this
+		r.skipepdEvent++
+		if r.skipepdEvent%100 == 0 {
+			glog.V(0).Infof("Skipped %d audit events", r.skipepdEvent)
+		}
+		glog.V(1).Infof("Ignoring event %s %s %s %s", ev.AuditID, ev.Stage, ev.RequestURI, ev.RequestReceivedTimestamp.Format("2006-01-02T15:04:05Z"))
+		return
+	}
 
 	r.eventReceivedMutex.Lock()
 	defer r.eventReceivedMutex.Unlock()
@@ -164,6 +176,11 @@ func (r *Reporter) processLine(line *string) {
 		return
 	}
 	r.tracer.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+	// TODO use prometheus for this
+	r.processedEvent++
+	if r.processedEvent%100 == 0 {
+		glog.V(0).Infof("Processed %d audit events", r.processedEvent)
+	}
 }
 
 // Run start the garbage collector loop and tail the audit log file
