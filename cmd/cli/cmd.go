@@ -63,6 +63,10 @@ func NewCommand() (*cobra.Command, *int) {
 	rootCommand.PersistentFlags().String("service-name", viperConfig.GetString("service-name"), "service name")
 	viperConfig.BindPFlag("service-name", rootCommand.PersistentFlags().Lookup("service-name"))
 
+	viperConfig.SetDefault("service-name-watch", "kubernetes-audit-watch")
+	rootCommand.PersistentFlags().String("service-name-watch", viperConfig.GetString("service-name-watch"), "service name for watch verb")
+	viperConfig.BindPFlag("service-name-watch", rootCommand.PersistentFlags().Lookup("service-name-watch"))
+
 	viperConfig.SetDefault("gc-threshold", 100)
 	rootCommand.PersistentFlags().String("gc-threshold", viperConfig.GetString("gc-threshold"), "garbage collection threshold for map references, lower use less memory but slower")
 	viperConfig.BindPFlag("gc-threshold", rootCommand.PersistentFlags().Lookup("gc-threshold"))
@@ -87,6 +91,10 @@ func newReporter() (*reporter.Reporter, error) {
 	if localAgentHostPort == "" {
 		return nil, fmt.Errorf("empty service-name")
 	}
+	serviceNameWatch := viperConfig.GetString("service-name-watch")
+	if localAgentHostPort == "" {
+		return nil, fmt.Errorf("empty service-name-watch")
+	}
 	gcThreshold := viperConfig.GetInt("gc-threshold")
 	if gcThreshold < 1 {
 		return nil, fmt.Errorf("invalid gc-threshold: %d", gcThreshold)
@@ -100,6 +108,7 @@ func newReporter() (*reporter.Reporter, error) {
 			AuditLogABSPath:            auditLogABSPath,
 			LocalAgentHostPort:         localAgentHostPort,
 			ServiceName:                serviceName,
+			ServiceNameWatch:           serviceNameWatch,
 			GarbageCollectionThreshold: gcThreshold,
 			Agent: agent,
 		},

@@ -32,6 +32,7 @@ type Config struct {
 	AuditLogABSPath            string
 	LocalAgentHostPort         string
 	ServiceName                string
+	ServiceNameWatch           string
 	GarbageCollectionThreshold int
 	Agent                      string
 	GarbageCollectPeriod       time.Duration
@@ -42,6 +43,7 @@ type Reporter struct {
 	conf *Config
 
 	tracer             opentracing.Tracer
+	tracerWatch        opentracing.Tracer
 	eventReceived      map[types.UID]*event.SpanEvent
 	eventReceivedMutex sync.Mutex
 	stopGC             chan struct{}
@@ -50,27 +52,39 @@ type Reporter struct {
 // NewReporter instantiate a New Reporter
 func NewReporter(conf *Config) (*Reporter, error) {
 	var err error
-	var t opentracing.Tracer
+	var t, tw opentracing.Tracer
 
 	glog.V(0).Infof("Using tracer for %s", conf.Agent)
 	if conf.Agent == DatadogAgent {
-		t = opentracer.New(
-			tracer.WithServiceName(conf.ServiceName),
-			tracer.WithAgentAddr(conf.LocalAgentHostPort),
-		)
+		agent := tracer.WithAgentAddr(conf.LocalAgentHostPort)
+		t = opentracer.New(tracer.WithServiceName(conf.ServiceName), agent)
+		tw = opentracer.New(tracer.WithServiceName(conf.ServiceNameWatch), agent)
 	} else {
-		cfg := jaeger.Configuration{
-			ServiceName: conf.ServiceName,
-			Sampler: &jaeger.SamplerConfig{
-				Type:  "const",
-				Param: 1,
-			},
-			Reporter: &jaeger.ReporterConfig{
-				BufferFlushInterval: 1 * time.Second,
-				LocalAgentHostPort:  conf.LocalAgentHostPort,
-			},
+		// TODO DRY this
+		r := &jaeger.ReporterConfig{
+			BufferFlushInterval: 1 * time.Second,
+			LocalAgentHostPort:  conf.LocalAgentHostPort,
 		}
-		t, _, err = cfg.NewTracer()
+		s := &jaeger.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		}
+		jConfig := jaeger.Configuration{
+			ServiceName: conf.ServiceName,
+			Sampler:     s,
+			Reporter:    r,
+		}
+		jConfigWatch := jaeger.Configuration{
+			ServiceName: conf.ServiceNameWatch,
+			Sampler:     s,
+			Reporter:    r,
+		}
+		t, _, err = jConfig.NewTracer()
+		if err != nil {
+			glog.Errorf("Unexpected error: %v", err)
+			return nil, err
+		}
+		tw, _, err = jConfigWatch.NewTracer()
 		if err != nil {
 			glog.Errorf("Unexpected error: %v", err)
 			return nil, err
@@ -82,6 +96,7 @@ func NewReporter(conf *Config) (*Reporter, error) {
 	return &Reporter{
 		conf:          conf,
 		tracer:        t,
+		tracerWatch:   tw,
 		eventReceived: make(map[types.UID]*event.SpanEvent),
 		stopGC:        make(chan struct{}),
 	}, nil
@@ -142,8 +157,13 @@ func (r *Reporter) processLine(line *string) {
 		r.eventReceived[ev.AuditID] = ev
 		return
 	}
-	r.tracer.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
 	delete(r.eventReceived, ev.AuditID)
+	if ev.Verb == "watch" && ev.Stage == audit.StageResponseComplete {
+		// long running query
+		r.tracerWatch.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+		return
+	}
+	r.tracer.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
 }
 
 // Run start the garbage collector loop and tail the audit log file
@@ -153,7 +173,7 @@ func (r *Reporter) Run() error {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Reset(syscall.SIGINT, syscall.SIGTERM)
 
-	glog.V(0).Infof("Start reading %s and reporting as service %q", r.conf.AuditLogABSPath, r.conf.ServiceName)
+	glog.V(0).Infof("Start reading %s and reporting as service %q and %q", r.conf.AuditLogABSPath, r.conf.ServiceName, r.conf.ServiceNameWatch)
 	t, err := tail.TailFile(r.conf.AuditLogABSPath, tail.Config{
 		Follow: true,
 	})
