@@ -6,6 +6,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"k8s.io/apiserver/pkg/apis/audit"
 	"strconv"
+	"fmt"
 )
 
 // SpanEvent is a kubernetes audit Event generated from the audit logs
@@ -25,7 +26,7 @@ func (e *SpanEvent) baseTags() opentracing.Tags {
 		// This is required by the datadog APM
 		"http.url":      e.RequestURI,
 		"http.method":   e.Verb,
-		"resource.name": e.ObjectRef.APIVersion + "/" + e.ObjectRef.Resource,
+		"resource.name": fmt.Sprintf("%s %s/%s", e.Verb, e.ObjectRef.APIVersion, e.ObjectRef.Resource),
 		"span.type":     "web",
 
 		"k8s.level":         e.Level,
