@@ -5,6 +5,7 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"k8s.io/apiserver/pkg/apis/audit"
+	"strconv"
 )
 
 // SpanEvent is a kubernetes audit Event generated from the audit logs
@@ -21,6 +22,12 @@ func addTag(tags opentracing.Tags, key, value string) {
 
 func (e *SpanEvent) baseTags() opentracing.Tags {
 	baseTags := opentracing.Tags{
+		// This is required by the datadog APM
+		"http.url":      e.RequestURI,
+		"http.method":   e.Verb,
+		"resource.name": e.ObjectRef.APIVersion + "/" + e.ObjectRef.Resource,
+		"span.type":     "web",
+
 		"k8s.level":         e.Level,
 		"k8s.audit_id":      e.AuditID,
 		"k8s.stage":         e.Stage,
@@ -45,7 +52,11 @@ func (e *SpanEvent) baseTags() opentracing.Tags {
 
 func (e *SpanEvent) statusTags() opentracing.Tags {
 	baseTags := e.baseTags()
-	baseTags["k8s.response_status.code"] = e.ResponseStatus.Code
+
+	// This creates an issue on the datadog UI
+	//baseTags["k8s.response_status.code"] = e.ResponseStatus.Code
+
+	baseTags["http.status_code"] = strconv.Itoa(int(e.ResponseStatus.Code))
 	addTag(baseTags, "k8s.response_status.status", e.ResponseStatus.Status)
 	addTag(baseTags, "k8s.response_status.message", e.ResponseStatus.Message)
 	addTag(baseTags, "k8s.response_status.reason", string(e.ResponseStatus.Reason))
@@ -58,12 +69,6 @@ func (e *SpanEvent) Tags() opentracing.Tags {
 		return e.baseTags()
 	}
 	return e.statusTags()
-}
-
-// OperationName returns the operation name constructed with the APIVersion and the Resource
-// e.g: v1/pods
-func (e *SpanEvent) OperationName() string {
-	return e.ObjectRef.APIVersion + "/" + e.ObjectRef.Resource
 }
 
 // StartTime returns the time when the event was generated

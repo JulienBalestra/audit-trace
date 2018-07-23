@@ -55,7 +55,7 @@ func NewCommand() (*cobra.Command, *int) {
 	rootCommand.PersistentFlags().String("audit-log-path", viperConfig.GetString("audit-log-path"), "audit-log file path")
 	viperConfig.BindPFlag("audit-log-path", rootCommand.PersistentFlags().Lookup("audit-log-path"))
 
-	viperConfig.SetDefault("trace-agent-endpoint", "127.0.0.1:5775")
+	viperConfig.SetDefault("trace-agent-endpoint", "127.0.0.1:8126")
 	rootCommand.PersistentFlags().String("trace-agent-endpoint", viperConfig.GetString("trace-agent-endpoint"), "trace agent endpoint host:port")
 	viperConfig.BindPFlag("trace-agent-endpoint", rootCommand.PersistentFlags().Lookup("trace-agent-endpoint"))
 

@@ -26,7 +26,7 @@ audit-trace --audit-log-path /var/log/kubernetes/audit.log
       --gc-threshold string           garbage collection threshold for map references, lower use less memory but slower (default "100")
   -h, --help                          help for audit-trace
       --service-name string           service name (default "kubernetes-audit")
-      --trace-agent-endpoint string   trace agent endpoint host:port (default "127.0.0.1:5775")
+      --trace-agent-endpoint string   trace agent endpoint host:port (default "127.0.0.1:8126")
   -v, --verbose int                   verbose level
 ```
 

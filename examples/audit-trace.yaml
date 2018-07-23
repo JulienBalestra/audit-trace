@@ -93,6 +93,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: audit-trace
+        imagePullPolicy: Never
         image: quay.io/julienbalestra/audit-trace:master
         command:
         - /usr/local/bin/audit-trace

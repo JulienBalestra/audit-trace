@@ -134,7 +134,6 @@ func (r *Reporter) processLine(line *string) {
 		return
 	}
 	glog.V(2).Infof("Event %s %s %s", ev.AuditID, ev.Stage, ev.RequestURI)
-	operationName := ev.OperationName()
 
 	r.eventReceivedMutex.Lock()
 	defer r.eventReceivedMutex.Unlock()
@@ -143,7 +142,7 @@ func (r *Reporter) processLine(line *string) {
 		r.eventReceived[ev.AuditID] = ev
 		return
 	}
-	r.tracer.StartSpan(operationName, ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+	r.tracer.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
 	delete(r.eventReceived, ev.AuditID)
 }
 
