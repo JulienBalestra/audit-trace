@@ -72,6 +72,11 @@ func (e *SpanEvent) Tags() opentracing.Tags {
 	return e.statusTags()
 }
 
+// ClientServiceName returns the user or service account client name
+func (e *SpanEvent) ClientServiceName() string {
+	return "k8s-" + e.User.Username
+}
+
 // StartTime returns the time when the event was generated
 func (e *SpanEvent) StartTime() opentracing.StartTime {
 	return opentracing.StartTime(e.RequestReceivedTimestamp.Time)

@@ -49,59 +49,65 @@ type Reporter struct {
 	eventReceivedMutex sync.Mutex
 	stopGC             chan struct{}
 	processedEvent     int
-	skipepdEvent       int
+	skippedEvent       int
+	getClientTracer    func(serviceName string, agentAddress *string) (opentracing.Tracer, error)
+}
+
+func getJaegerClientTracer(serviceName string, agentAddress *string) (opentracing.Tracer, error) {
+	jConfig := jaeger.Configuration{
+		ServiceName: serviceName,
+		Sampler: &jaeger.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+		Reporter: &jaeger.ReporterConfig{
+			BufferFlushInterval: 1 * time.Second,
+			LocalAgentHostPort:  *agentAddress,
+		},
+	}
+	t, _, err := jConfig.NewTracer()
+	if err != nil {
+		glog.Errorf("Unexpected error: %v", err)
+		return nil, err
+	}
+	return t, nil
+}
+
+func getDatadogClientTracer(serviceName string, agentAddress *string) (opentracing.Tracer, error) {
+	return opentracer.New(tracer.WithServiceName(serviceName), tracer.WithAgentAddr(*agentAddress)), nil
 }
 
 // NewReporter instantiate a New Reporter
 func NewReporter(conf *Config) (*Reporter, error) {
 	var err error
 	var t, tw opentracing.Tracer
+	var getTracer func(serviceName string, agentAddress *string) (opentracing.Tracer, error)
 
 	glog.V(0).Infof("Using tracer for %s", conf.Agent)
 	if conf.Agent == DatadogAgent {
-		agent := tracer.WithAgentAddr(conf.LocalAgentHostPort)
-		t = opentracer.New(tracer.WithServiceName(conf.ServiceName), agent)
-		tw = opentracer.New(tracer.WithServiceName(conf.ServiceNameWatch), agent)
+		getTracer = getDatadogClientTracer
 	} else {
-		// TODO DRY this
-		r := &jaeger.ReporterConfig{
-			BufferFlushInterval: 1 * time.Second,
-			LocalAgentHostPort:  conf.LocalAgentHostPort,
-		}
-		s := &jaeger.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		}
-		jConfig := jaeger.Configuration{
-			ServiceName: conf.ServiceName,
-			Sampler:     s,
-			Reporter:    r,
-		}
-		jConfigWatch := jaeger.Configuration{
-			ServiceName: conf.ServiceNameWatch,
-			Sampler:     s,
-			Reporter:    r,
-		}
-		t, _, err = jConfig.NewTracer()
-		if err != nil {
-			glog.Errorf("Unexpected error: %v", err)
-			return nil, err
-		}
-		tw, _, err = jConfigWatch.NewTracer()
-		if err != nil {
-			glog.Errorf("Unexpected error: %v", err)
-			return nil, err
-		}
+		getTracer = getJaegerClientTracer
+	}
+
+	t, err = getTracer(conf.ServiceName, &conf.Agent)
+	if err != nil {
+		return nil, err
+	}
+	tw, err = getTracer(conf.ServiceNameWatch, &conf.Agent)
+	if err != nil {
+		return nil, err
 	}
 	opentracing.SetGlobalTracer(t)
 
 	conf.GarbageCollectPeriod = time.Minute // TODO conf this from cmd
 	return &Reporter{
-		conf:          conf,
-		tracer:        t,
-		tracerWatch:   tw,
-		eventReceived: make(map[types.UID]*event.SpanEvent),
-		stopGC:        make(chan struct{}),
+		conf:            conf,
+		tracer:          t,
+		tracerWatch:     tw,
+		eventReceived:   make(map[types.UID]*event.SpanEvent),
+		stopGC:          make(chan struct{}),
+		getClientTracer: getTracer,
 	}, nil
 }
 
@@ -154,9 +160,9 @@ func (r *Reporter) processLine(line *string) {
 	glog.V(2).Infof("New event %s %s %s", ev.AuditID, ev.Stage, ev.RequestURI)
 	if ev.RequestReceivedTimestamp.Time.Before(time.Now().Add(-r.conf.BacklogLimit)) {
 		// TODO use prometheus for this
-		r.skipepdEvent++
-		if r.skipepdEvent%100 == 0 {
-			glog.V(0).Infof("Skipped %d audit events", r.skipepdEvent)
+		r.skippedEvent++
+		if r.skippedEvent%100 == 0 {
+			glog.V(0).Infof("Skipped %d audit events", r.skippedEvent)
 		}
 		glog.V(1).Infof("Ignoring event %s %s %s %s", ev.AuditID, ev.Stage, ev.RequestURI, ev.RequestReceivedTimestamp.Format("2006-01-02T15:04:05Z"))
 		return
@@ -172,13 +178,25 @@ func (r *Reporter) processLine(line *string) {
 	delete(r.eventReceived, ev.AuditID)
 	if ev.Verb == "watch" && ev.Stage == audit.StageResponseComplete {
 		// long running query
-		r.tracerWatch.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+		clientTracer, err := r.getClientTracer(ev.ClientServiceName(), &r.conf.Agent)
+		if err != nil {
+			return
+		}
+		rootSpan := clientTracer.StartSpan("http.request", ev.StartTime(), ev.Tags())
+		r.tracerWatch.StartSpan("apiserver", opentracing.ChildOf(rootSpan.Context()), ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+		rootSpan.FinishWithOptions(ev.FinishTime())
 		return
 	}
-	r.tracer.StartSpan("http.request", ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+	clientTracer, err := r.getClientTracer(ev.ClientServiceName(), &r.conf.Agent)
+	if err != nil {
+		return
+	}
+	rootSpan := clientTracer.StartSpan("http.request", ev.StartTime(), ev.Tags())
+	r.tracer.StartSpan("apiserver", opentracing.ChildOf(rootSpan.Context()), ev.StartTime(), ev.Tags()).FinishWithOptions(ev.FinishTime())
+	rootSpan.FinishWithOptions(ev.FinishTime())
 	// TODO use prometheus for this
 	r.processedEvent++
-	if r.processedEvent%100 == 0 {
+	if r.processedEvent%1000 == 0 {
 		glog.V(0).Infof("Processed %d audit events", r.processedEvent)
 	}
 }
